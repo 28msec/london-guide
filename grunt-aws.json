@@ -1,0 +1,7 @@
+{
+  "key": "", 
+  "secret": "",
+  "region": "us-east-1",
+  "bucket_prod": "www.guide",
+  "bucket_test": "test.guide"
+}

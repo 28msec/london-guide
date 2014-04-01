@@ -1,0 +1,21 @@
+<div class="row">
+ <div ng-show="loading" class="col-md-12">
+   <div class="well">
+   Loading...
+   </div>
+ </div>
+ <div ng-show="!loading && results.length==0" class="col-md-12">
+   <div class="well">
+   Nothing found.
+   </div>
+ </div>
+	<div ng-repeat="data in results" ng-class="classA($index)">
+		<div ng-include="'/views/single.html'" ></div>	
+		<a href="/detail/{{data.id}}" class="btn btn-default">More</a>
+		</div>
+</div>
+<div ng-show="results.length>0" class="row">
+  <div class="col-md-6 col-md-offset-6 space">
+    <a href="/all/{{phrase}}" class="btn btn-default btn-block">Show more results</a>
+  </div>
+</div>

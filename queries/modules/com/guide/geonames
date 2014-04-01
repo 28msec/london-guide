@@ -1,0 +1,106 @@
+jsoniq version "1.0";
+
+module namespace geonames = "http://guide.com/geonames";
+
+import module namespace catalog = "http://guide.com/catalog";
+
+import module namespace http="http://zorba.io/modules/http-client";
+
+declare namespace gn="http://www.geonames.org/ontology#";
+declare namespace rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#";
+declare namespace pos="http://www.w3.org/2003/01/geo/wgs84_pos#";
+
+declare %an:nondeterministic function geonames:geonames($phrase as string)
+{
+  variable $service := "http://api.geonames.org/search";
+  variable $query := $service || "?username=28msec&type=rdf&country=gb&maxRows=10&q=" || fn:encode-for-uri($phrase);
+  variable $result := http:get($query);
+  if ($result.status eq 200)
+  then parse-xml($result.body.content)/rdf:RDF/gn:Feature
+  else ()
+};
+
+declare %an:nondeterministic function geonames:geonames-near($lat,$lng)
+{
+  variable $service := "http://api.geonames.org/findNearbyWikipedia"; 
+  variable $query := $service || "?lat=" || $lat || "&lng=" || $lng || "&username=28msec&maxRows=50";
+  variable $result := http:get($query);
+  
+  if ($result.status eq 200)
+  then parse-xml($result.body.content)/geonames/entry
+  else ()  
+};
+
+declare %an:sequential function geonames:process-entry($entry as object(), $key as string)
+{
+    variable $geonames := geonames:geonames($key);  
+    
+    variable $result-data :=
+        if (count($geonames) eq 1)
+        then (         
+             let $map-link := string($geonames/gn:locationMap[1]/@rdf:resource)
+            where $map-link
+            return { type : "link", part:"main", href : $map-link, title : "Geonames Map" },        
+            
+            let $wiki := string($geonames/gn:wikipediaArticle[1]/@rdf:resource)
+            where $wiki
+            return { type : "link", part:"main", href : $wiki, title : "Wikipedia" },        
+            
+            let $lat := double($geonames/pos:lat)
+            let $long := double($geonames/pos:long)
+            where exists($lat) and exists($long)
+            return { type : "map", part:"main", center : { latitude : $lat, longitude : $long } }  
+        )    
+        else if (count($geonames) gt 1)
+        then
+          { 
+              type : "table", 
+              part : "Get in",
+              title : "Geonames", 
+              head : [ 
+                { property : "name", title : "Name" },
+                { property : "lat", title : "Lat" },
+                { property : "long", title : "Long" },
+                { property : "maplink", title : "Map", linktitle : "Map" },
+                { property : "wikilink", title : "Wiki", linktitle : "Wikipedia" }
+              ],
+              data : 
+            [
+                
+                for $entry in $geonames
+                let $name := string($entry/gn:name[1])
+                let $map-link := string($entry/gn:locationMap[1]/@rdf:resource)
+                let $wiki := string($entry/gn:wikipediaArticle[1]/@rdf:resource)
+                let $lat := double($entry/pos:lat)
+                let $long := double($entry/pos:long)
+                return { name :$name, 
+                         lat : $lat, 
+                         long : $long, 
+                         maplink : $map-link, 
+                         wikilink : $wiki }
+            ]          
+          }
+         else {| |};
+    catalog:add-data($entry, "geonames", $key, (), (), $key, [ $result-data ]);
+};
+    
+    
+declare function geonames:key($entry as object()) as string?
+{
+   ($entry.keys[][$$.type eq "geonames"].key, $entry.title)[1]
+};
+
+declare %an:sequential function geonames:process()
+{
+    variable $entries := catalog:get-unprocessed("geonames");
+    
+    if (empty($entries))
+    then ()
+    else
+    {
+      for $entry in $entries
+      let $key := geonames:key($entry)
+      where exists($key)
+      return geonames:process-entry($entry, $key);    
+    }
+};

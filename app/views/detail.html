@@ -1,0 +1,8 @@
+<div ng-repeat="data in results" class="row">
+  <div class="col-md-12">
+
+  <div><a href="/detail/{{ data.parent }}">{{ data.parent_title }}</a></div>
+  <div ng-include="'/views/single.html'" ></div>	
+  
+  </div>
+</div>

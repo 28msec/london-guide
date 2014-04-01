@@ -1,0 +1,108 @@
+jsoniq version "1.0";
+
+module namespace index = "http://guide.com/index";
+
+import module namespace pss = "http://zorba.io/modules/data-cleaning/phonetic-string-similarity";
+import module namespace ft = "http://www.28msec.com/modules/full-text";
+
+declare %an:sequential function index:build-index()
+{
+    for $section in collection("content")
+    where exists($section.title) and not($section.title eq "")   
+    return
+        {
+          flush();
+          let $basescore := 200 + count($section.data[].data[]) * 20
+          let $entries :=
+          (
+           
+            let $titlescore := 2000 - 10 * count(tokenize($section.title,"[\\W]"))
+            return index:index-line($section.title, $section._id, "main", $titlescore + $basescore)
+                 
+                 (:
+            for $para in $section.data[].data[][$$.type eq "para"]
+            for $line at $idx in parse-xml("<div>" || $para.html || "</div>")/descendant::text()
+            return index:index-line($line, $section._id, $para.part, 1 + $basescore - $idx),
+            
+            for $para in $section.data[].data[][$$.type eq "extra"]
+            for $line in string($para.html)
+            return index:index-line($line, $section._id, $para.part, 1 + $basescore - 3)
+           :)
+            (:
+            for $phrase in $xml/descendant::book:phrase/text()
+            return index:index-line($phrase, $section._id, 10 + $basescore)
+            :)
+          )
+          return db:insert("index", index:group($section._id, $entries));         
+        }
+  
+};
+
+declare function index:index-line($line as string, $section-id as string, $part-id as string, $relevance as integer)
+{
+    let $words := tokenize($line,"[\\W]")
+    for $word in $words
+    return index:index-entry($word, $section-id, $part-id, $relevance)
+};
+
+declare function index:index-entry($word as string, $section-id as string, $part-id as string, $relevance as integer)
+{     
+     let $word := lower-case($word)
+     where not($word eq "") or ft:is-stop-word($word)
+     return
+     {
+         w : $word,
+         k : pss:metaphone-key($word),
+         s : $section-id,
+         p : $part-id,
+         r : $relevance
+     }          
+};
+
+declare function index:group($section-id as string, $entries as object()*)
+as object()*
+{
+   for $part in distinct-values($entries.p)   
+   return
+   
+   for $entry in $entries
+   where $entry.p = $part
+   let $word := $entry.w   
+   group by $word
+   return
+     {
+        w : $word,
+        p : $part,
+        k : pss:metaphone-key($word),
+        s : $section-id,
+        r : sum($entry.r)
+     } 
+};
+
+declare function index:index-search($phrase)
+{
+   let $words := tokenize(lower-case($phrase),"[\\W]")
+   let $results :=
+      for $word in $words
+      where not(ft:is-stop-word($word))
+      for $result in find("index", { w : $word })
+      let $section := $result.s
+      let $part := $result.p
+      group by $section, $part
+      return
+          {
+              s : $section,
+              p : $part,
+              r : index:mul($result.r) 
+          }
+    for $result in $results
+    order by $result.r descending
+    return $result
+};
+
+declare function index:mul($vals as integer*)
+{
+    if (count($vals) eq 1) then $vals
+    else if (count($vals) eq 0) then 0
+    else $vals[1] * index:mul(subsequence($vals,2))
+};

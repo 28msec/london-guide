@@ -1,0 +1,41 @@
+<div class="row">
+ <div ng-show="loading" class="col-md-12">
+   <div class="well">
+   Loading, please be patient...
+   </div>
+ </div>
+ <div ng-show="!loading && results.length==0" class="col-md-12">
+   <div class="well">
+   Nothing found.
+   </div>
+ </div>
+
+ <div ng-show="!loading && results.length>0" class="md-col-12">
+   <table class="table table-striped">
+     <thead>
+     <tr>
+       <th>Title</th>
+       <th>Score</th>
+       <th>Wikivoyage</th>
+       <th>DBPedia</th>
+       <th>Geonames</th>
+       <th>Picture</th>
+       <th>Map</th>
+       <th>Links</th>       
+     </tr>
+     </thead>
+     <tbody>
+     <tr ng-repeat="data in results">
+       <td><a href="/detail/{{data.id}}">{{ data.title }}</a></td>
+       <td>{{ data.score }}</td>
+       <td><span ng-show="data.para" class="glyphicon glyphicon-ok"></span></td>
+       <td><span ng-show="data.extra" class="glyphicon glyphicon-ok"></span></td>
+       <td><span ng-show="data.table" class="glyphicon glyphicon-ok"></span></td>
+       <td><span ng-show="data.image" class="glyphicon glyphicon-ok"></span></td>
+       <td><span ng-show="data.map" class="glyphicon glyphicon-ok"></span></td>
+       <td><span ng-show="data.link" class="glyphicon glyphicon-ok"></span></td>
+     </tr>
+     </tbody>
+   </table>
+ </div>
+</div>

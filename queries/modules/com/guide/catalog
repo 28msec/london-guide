@@ -1,0 +1,132 @@
+jsoniq version "1.0";
+
+module namespace catalog = "http://guide.com/catalog";
+
+import module namespace http="http://zorba.io/modules/http-client";
+import module namespace html = "http://www.zorba-xquery.com/modules/converters/html";
+
+declare namespace book ="http://docbook.org/ns/docbook";
+
+declare %an:sequential function catalog:add($key-type as string, $key as string, $parent-id as string?, $parent-part as string?)
+{
+    variable $id := replace($key,"[/\\s]","_");
+    variable $result := db:apply-insert("content", {
+        _id : $id,      
+        keys : [
+          { type : "system", key : $id },
+          { type : $key-type, key : $key }
+        ],
+        parent : $parent-id,
+        parent-part : $parent-part,
+        data : []
+    }
+    );
+   
+    $result
+};
+
+declare function catalog:get($key as string)
+{
+    find("content", { "keys.key" : $key })
+};
+
+declare function catalog:get-by-id($id as string)
+{
+    find("content", { "_id": $id })
+};
+
+declare function catalog:get-unprocessed($type as string)
+{
+    for $entry in collection("content")
+    where empty($entry.data[][$$.type eq $type])
+    return $entry
+};
+
+
+declare %an:sequential function catalog:add-data($existing-entry as object()?, $key-type as string, $key as string, $parent-id as string?, $parent-part as string?, $title as string, $data)
+as object()
+{
+    variable $entry :=
+      if (empty($existing-entry))
+      then catalog:get($key)
+      else $existing-entry;
+    
+    if (empty($entry))
+    then $entry := catalog:add($key-type, $key, $parent-id, $parent-part);
+    else if (empty($entry.keys[][$$.type eq $key-type]))
+    then append json { type : $key-type, key : $key } into $entry.keys;
+    else ();
+    
+    if (exists($entry.title))
+    then ();
+    else insert json { title : $title } into $entry;
+
+    append json { type : $key-type, data : $data } into $entry.data;
+    flush();
+    
+    $entry
+};
+
+declare function catalog:get-data-by-key($key as string, $part as string)
+as object()*
+{
+    catalog:get-data(catalog:get($key)[1], $part)              
+};
+
+declare function catalog:get-data-by-id($id as string, $part as string)
+as object()*
+{
+    catalog:get-data(find("content", { "_id" : $id }), $part)              
+};
+
+declare function catalog:get-data($entry as object(), $part as string)
+as object()*
+{     
+    let $parent :=
+      if ($entry.parent) then catalog:get($entry.parent)[1] else ()
+    return
+    {| 
+        {
+          id : $entry._id,
+          title : if ($part eq "main") 
+                  then $entry.title 
+                  else ($entry.title || " - " || $part)                  
+        },
+        
+        if ($part eq "main")
+        then
+        {
+            parent : $parent._id,
+            parent_title : $parent.title
+        }
+        else
+        {
+            parent : $entry._id,
+            parent_title : $entry.title
+        },
+        
+        let $subparts :=
+          if ($part eq "main")
+          then 
+              let $part-names :=
+                  for $e in $entry.data[].data[]
+                  let $part := $e.part
+                  where not($part eq "main")
+                  group by $part
+                  return $part
+              for $part-name in $part-names
+              return 
+              { 
+                  type : "section", 
+                  part : "main", 
+                  id : ($entry._id || "/" || $part-name),
+                  title : $part-name
+              }
+          else ()
+        for $data in ($subparts, $entry.data[].data[][$$.part eq $part])
+        where exists($data.type) 
+        group by $type := $data.type
+        return { $type : [ for $d at $idx in $data where $idx eq 1 or not($d.type eq "map") return $d ] }
+    |}
+         
+};

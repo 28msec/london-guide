@@ -1,0 +1,148 @@
+jsoniq version "1.0";
+
+module namespace dbpedia = "http://guide.com/dbpedia";
+
+import module namespace catalog = "http://guide.com/catalog";
+
+import module namespace http="http://zorba.io/modules/http-client";
+import module namespace sparql = "http://www.28msec.com/modules/sparql";
+
+declare namespace cc="http://creativecommons.org/ns#";
+declare namespace dcterms="http://purl.org/dc/terms/"; 
+declare namespace foaf="http://xmlns.com/foaf/0.1/"; 
+declare namespace gn="http://www.geonames.org/ontology#";
+declare namespace owl="http://www.w3.org/2002/07/owl#"; 
+declare namespace rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#";
+declare namespace rdfs="http://www.w3.org/2000/01/rdf-schema#"; 
+declare namespace wgs84_pos="http://www.w3.org/2003/01/geo/wgs84_pos#";
+
+
+declare function dbpedia:dbpedia-exact($phrase as string)
+{
+    try {
+  for $r in sparql:query-json("
+  PREFIX owl: <http://www.w3.org/2002/07/owl#>
+  PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+  PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+  PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+  PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+  PREFIX dc: <http://purl.org/dc/elements/1.1/>
+  PREFIX : <http://dbpedia.org/resource/>
+  PREFIX dbpedia2: <http://dbpedia.org/property/>
+  PREFIX dbpedia: <http://dbpedia.org/>
+  PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+  PREFIX dbo: <http://dbpedia.org/ontology/>
+ 
+   SELECT ?subj ?verb ?obj WHERE {
+     ?subj rdfs:label '" || replace($phrase,"'","\\\\'") || "'@en .    
+     ?subj dbo:abstract ?abs .
+     ?subj ?verb ?obj
+     FILTER langMatches( lang(?abs), 'en' )
+   }  
+").results.bindings[]
+  where empty($r.obj("xml:lang")) or $r.obj("xml:lang") eq "en"
+  return { subj : $r.subj.value, verb : $r.verb.value, obj : $r.obj.value }
+    } catch * { () }
+};
+
+declare function dbpedia:dbpedia-children($verb as string, $key as string)
+{
+    try {
+  for $r in sparql:query-json("
+  PREFIX owl: <http://www.w3.org/2002/07/owl#>
+  PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+  PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+  PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+  PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+  PREFIX dc: <http://purl.org/dc/elements/1.1/>
+  PREFIX : <http://dbpedia.org/resource/>
+  PREFIX dbpedia2: <http://dbpedia.org/property/>
+  PREFIX dbpedia: <http://dbpedia.org/>
+  PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+  PREFIX dbo: <http://dbpedia.org/ontology/>
+ 
+   SELECT ?subj ?obj WHERE {     
+     ?subj " || $verb || " <" || $key || "> .
+     ?subj rdfs:label ?obj 
+     FILTER langMatches( lang(?obj), 'en' )
+   }  
+").results.bindings[] 
+  return { subj : $r.obj.value }
+    } catch * { () }
+};
+
+declare %an:sequential function dbpedia:process-entry($entry as object(), $key as string)
+{
+    variable $dbpedia := dbpedia:dbpedia-exact($key);  
+    
+    
+    variable $children := if (exists($dbpedia)) then dbpedia:dbpedia-children("dbo:location", $dbpedia[1].subj) else ();
+    
+    for $location in $children
+    let $sub-key := $location.subj
+    where not($sub-key = "")
+    and empty(catalog:get($sub-key))
+    return {
+        catalog:add("dbpedia", $sub-key , $key, "See");
+    }
+    
+    variable $parts := if (exists($dbpedia)) then dbpedia:dbpedia-children("dbo:borough", $dbpedia[1].subj) else ();
+    
+    for $location in $parts
+    let $sub-key := $location.subj
+    where not($sub-key = "")
+    and empty(catalog:get($sub-key))
+    return {
+        catalog:add("dbpedia", $sub-key , $key, "Districts");
+    }        
+        
+    variable $result-data := (
+        for $abstract in $dbpedia[$$.verb eq "http://dbpedia.org/ontology/abstract"].obj
+        where exists($abstract)
+        return { type : "extra", part:"main", title : "DB Pedia", html : $abstract },
+        for $image in $dbpedia[$$.verb eq "http://xmlns.com/foaf/0.1/depiction"].obj    
+        return { type : "image" , part:"main", href : $image },
+        for $wikiLink in $dbpedia[$$.verb eq "http://xmlns.com/foaf/0.1/isPrimaryTopicOf"].obj
+        return { type : "link" , part:"main", href : $wikiLink, title : "More Information" },   
+        for $wikiLink in $dbpedia[$$.verb eq "http://dbpedia.org/ontology/wikiPageExternalLink"].obj
+        return { type : "link" , part:"main", href : $wikiLink, title : "External Link" },
+        for $homepage in $dbpedia[$$.verb eq "http://xmlns.com/foaf/0.1/homepage"].obj
+        return { type : "link" , part:"main", href : $homepage, title : "Homepage" },
+        for $photos in $dbpedia[$$.verb eq "http://dbpedia.org/property/hasPhotoCollection"].obj
+        return { type : "link" , part:"main", href : $photos, title : "Photo Collection" }, 
+        let $lat := $dbpedia[$$.verb eq "http://dbpedia.org/property/latitude"].obj
+        let $long := $dbpedia[$$.verb eq "http://dbpedia.org/property/longitude"].obj
+        where exists($lat) and exists($long)
+        return { type : "map", part:"main", center : { latitude : $lat, longitude : $long } },
+        for $location in $children
+        let $sub-key := $location.subj
+        where not($sub-key = "")
+        return { type : "section" , part:"See" , id : $sub-key, title : $sub-key },
+        for $location in $parts
+        let $sub-key := $location.subj
+        where not($sub-key = "")
+        return { type : "section" , part:"Districts" , id : $sub-key, title : $sub-key }
+    ); 
+    catalog:add-data($entry, "dbpedia", $key, (), (), $key, [ $result-data ]);
+};
+
+
+declare function dbpedia:key($entry as object()) as string?
+{
+   ($entry.keys[][$$.type eq "dbpedia"].key, $entry.title)[1]
+};
+
+declare %an:sequential function dbpedia:process()
+{
+    variable $entries := catalog:get-unprocessed("dbpedia");
+    
+    if (empty($entries))
+    then ()
+    else
+    {
+      for $entry in $entries
+      let $key := dbpedia:key($entry)
+      where exists($key)
+      return dbpedia:process-entry($entry, $key);    
+    }
+};

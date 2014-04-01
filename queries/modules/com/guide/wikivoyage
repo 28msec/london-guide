@@ -1,0 +1,146 @@
+jsoniq version "1.0";
+
+module namespace wikivoyage = "http://guide.com/wikivoyage";
+
+import module namespace http="http://zorba.io/modules/http-client";
+import module namespace html = "http://www.zorba-xquery.com/modules/converters/html";
+
+import module namespace catalog = "http://guide.com/catalog";
+
+declare %an:nondeterministic function wikivoyage:get-page($name as string)
+{
+   let $content := http:get("http://en.wikivoyage.org/w/api.php?format=xml&action=parse&page=" || encode-for-uri($name)).body.content
+   return parse-xml($content)
+};
+
+declare function wikivoyage:extract-html($xml-content)
+{
+   let $text := $xml-content/api/parse/text/text()
+   where exists($text)
+   return html:parse($text)
+};
+
+declare function wikivoyage:extract-links($xml-content, $prefix as string)
+{
+    for $link in $xml-content/api/parse/links/pl
+    where starts-with($link, $prefix) and not(contains($link,"("))
+    return string($link)
+};
+
+declare function wikivoyage:process-html($html, $prefix)
+{
+    copy $page := <div>{ $html }</div>
+    modify (
+        for $subtitle in $page/descendant::*:h3
+        return replace node $subtitle with <h3>{ $subtitle/*:span[@class = "mw-headline"]/text() }</h3>,
+        for $toc in $page/descendant::*:div[@class = "topbanner"]
+        return delete node $toc,
+        for $toc in $page/descendant::element()[@class = "mw-editsection"]
+        return delete node $toc
+    )
+    return wikivoyage:para($page, $prefix)
+};
+
+declare function wikivoyage:para($elem, $prefix) {
+    for $item in $elem/node()
+    return
+        if ($item/self::text())
+        then string(fn:replace($item,"[\\s]+"," "))
+        else if ($item/self::*:div[contains(@class,"thumb")])
+        then 
+            let $img := $item/descendant::*:img[@class eq "thumbimage"][1]
+            let $caption := string-join($item/descendant::text()," ")
+            return <div class="thumpimage">{ $img }<p><i>{ $caption }</i></p></div>
+        else if ($item/self::*:img)
+        then ()        
+        else if ($item/self::*:h3)
+        then <h3>{ wikivoyage:para($item, $prefix) }</h3>
+        else if ($item/self::*:p)
+        then <p>{ wikivoyage:para($item, $prefix) }</p>
+        else if ($item/self::*:table)
+        then 
+            if (count($item/descendant::*:tr) eq 1)
+            then <p>{ for $td in $item/descendant::*:td return wikivoyage:para($td, $prefix) }</p>
+            else <table class="table table-bordered">{ wikivoyage:para($item, $prefix) }</table>
+        else if ($item/self::*:tr)
+        then <tr>{ wikivoyage:para($item, $prefix) }</tr>
+        else if ($item/self::*:td)
+        then <td>{ wikivoyage:para($item, $prefix) }</td>
+        else if ($item/self::*:th)
+        then <th>{ wikivoyage:para($item, $prefix) }</th>
+        else if ($item/self::*:a)
+        then
+            if (starts-with($item/@href,"tel:") or contains($item/@href,"@"))
+            then $item
+            else if (starts-with($item/@href,"/wiki/"))
+            then 
+                if (starts-with($item/@href,"/wiki/" || $prefix) and not(contains($item/@href,"(")))
+                then <b><a href="/detail/{ replace(replace(substring-after($item/@href,"/wiki/"),"[/\\s]","_"),"#","/") }">{ wikivoyage:para($item, $prefix) }</a></b>           
+                else <i>{ wikivoyage:para($item, $prefix) }</i>
+            else 
+                if (starts-with(string($item/text()[1]),"["))
+                then ()
+                else <b><a href="/results/{ encode-for-uri(normalize-space(fn:replace(string-join($item," "),"[\\s]+"," "))) }">{ wikivoyage:para($item, $prefix) }</a></b>       
+        else wikivoyage:para($item, $prefix)
+};
+
+
+declare %an:sequential function wikivoyage:process($entry as object(), $key as string, $prefix as string)
+{
+    variable $xml := wikivoyage:get-page($key);
+    variable $html := wikivoyage:extract-html($xml);
+    variable $links := wikivoyage:extract-links($xml, $prefix);
+    variable $title := string(($html/descendant::*:div[@class = "name"])[1]);
+    
+    if (contains($title,"/"))
+    then $title := substring-after($title,"/");
+    else if (contains($title,","))
+    then $title := substring-before($title,",");
+    else ();
+    
+    if (empty($title)) then $title := "UNKNOWN"; else ();
+    
+    for $link in $links
+    where not(exists(catalog:get($link)))
+    return catalog:add("wikivoyage", $link, $key, "main");
+    
+    let $subsections :=
+        for $section in $html/descendant::*:h2[*:span/@class = "mw-headline"]
+        let $section-title := $section/*:span[@class eq "mw-headline"]
+        let $end-of-section := $section/following-sibling::*:h2[*:span/@class = "mw-headline"][1]
+        let $inner-content := $section/following-sibling::element()[$$ << $end-of-section]
+        where exists($inner-content)
+        let $content := <div>{ $inner-content }</div>
+            
+        let $sub-key := string($section-title/@id)
+        let $sub-title := string($section-title/text())
+        let $entry-class := 
+           $sub-title
+        let $full-title := $title || " - " || $sub-title
+        return 
+          { type : "para" , part : $entry-class, html: serialize(wikivoyage:process-html($content, $prefix)) } 
+    let $first-subsection := $html/descendant::*:h2[*:span/@class = "mw-headline"][1]
+    let $content := $first-subsection/preceding-sibling::element()   
+    return catalog:add-data($entry, "wikivoyage", $key, (), (), $title, [ { type : "para" , part:"main", html: serialize(wikivoyage:process-html($content, $prefix)) } , $subsections ] );
+                    
+};
+
+declare function wikivoyage:key($entry as object()) as string?
+{
+    $entry.keys[][$$.type eq "wikivoyage"].key
+};
+
+declare %an:sequential function wikivoyage:process($prefix as string)
+{
+    variable $entries := catalog:get-unprocessed("wikivoyage");
+    
+    if (empty($entries))
+    then ()
+    else
+    {
+      for $entry in $entries
+      let $key := wikivoyage:key($entry)
+      where exists($key)
+      return wikivoyage:process($entry, $entry.keys[][$$.type eq "wikivoyage"].key, $prefix);    
+    }
+};
