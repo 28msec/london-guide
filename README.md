@@ -1,8 +1,14 @@
 London Guide
 ======================
 
-Development setup steps
-----------------------------
+This is an example application that demonstrates how to work with data queried from different data sources.
+It is an online guide for london that is generated from three different data sources:
+- wikivoyage (parsing HTML)
+- DBPedia (doing SPARQL queries)
+- Geonames (using their HTTP API returning RDF)
+
+Development Setup
+-----------------
 
 - install nodejs : http://nodejs.org/download/
 - install git: http://git-scm.com/downloads/
@@ -16,16 +22,17 @@ npm install -g grunt grunt-cli bower
 
 - clone the repository
 
-Backend Installation
---------------------
+Backend
+-------
 
+The backend is located in the /queries directory.
 Create an account on http://28.io and install the 28.io command line tool
 
 ```
 $ npm install 28 -g
 ```
 
-Create a project with a mongoDB of your choice on 28.io. You can then use the CLI to deploy this project.
+Create a project with a mongoDB of your choice on 28.io. Inside the /queries directory you can then use the CLI to deploy this project:
 
 ```
 $ 28 login <your email>
@@ -34,6 +41,8 @@ $ 28 login <your email>
 ```
 $ 28 upload <projectname>
 ```
+
+On the 28.io plattform perform these steps:
 
 Add a SPARQL datasource for DBPedia to the project:
 
