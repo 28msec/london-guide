@@ -7,6 +7,11 @@ It is an online guide for london that is generated from three different data sou
 - DBPedia (doing SPARQL queries)
 - Geonames (using their HTTP API returning RDF)
 
+Live Demo
+---------
+You can try it out online at
+http://london-guide.s3-website-us-east-1.amazonaws.com/
+
 Development Setup
 -----------------
 
