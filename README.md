@@ -49,7 +49,7 @@ $ 28 upload <projectname>
 
 Configure Datasources
 -------
-On the 28.io plattform perform these steps:
+On the 28.io platform perform these steps:
 
 Add a SPARQL datasource for DBPedia to the project:
 
