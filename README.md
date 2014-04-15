@@ -27,7 +27,7 @@ npm install -g grunt grunt-cli bower
 
 - clone the repository
 
-Backend
+Import Queries
 -------
 
 The backend is located in the /queries directory.
@@ -47,6 +47,8 @@ $ 28 login <your email>
 $ 28 upload <projectname>
 ```
 
+Configure Datasources
+-------
 On the 28.io plattform perform these steps:
 
 Add a SPARQL datasource for DBPedia to the project:
